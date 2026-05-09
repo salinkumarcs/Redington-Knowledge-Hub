@@ -1,0 +1,43 @@
+items:
+- name: AI Red Team
+  href: index.yml
+- name: Overview
+  expanded: true
+  items:
+  - name: What is AI red teaming?
+    href: https://www.microsoft.com/security/blog/2023/08/07/microsoft-ai-red-team-building-future-of-safer-ai/
+  - name: The PyRIT framework blog
+    href: https://aka.ms/PYRITblog
+  - name: AI Security Training
+    href: training.md
+- name: Concept
+  expanded: false
+  items:
+  - name: Aligning the Phi-3 series of language models
+    href: https://arxiv.org/abs/2407.13833
+  - name: Taxonomy for machine learning failure
+    href: /security/engineering/failure-modes-in-machine-learning?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json
+  - name: AI shared responsibility model
+    href: /azure/security/fundamentals/shared-responsibility-ai?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json
+- name: How to
+  expanded: false
+  items:
+  - name: Guide for building AI red teams for LLMs
+    href: /azure/ai-services/openai/concepts/red-teaming?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json
+  - name: PyRIT how to guide
+    href: https://aka.ms/pyrit
+  - name: Developer threat modeling guidance for ML systems
+    href: /security/engineering/threat-modeling-aiml?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json
+- name: Reference
+  expanded: false
+  items:
+  - name: Lessons learned from 100 generative AI products
+    href: https://download.microsoft.com/download/4/9/6/496deaed-0dab-4e1d-85eb-7489a0f242a6/Lessons From Red Teaming 100 Generative AI Products eBook.pdf
+  - name: Responsible AI standard and impact assessment
+    href: https://www.microsoft.com/ai/tools-practices
+  - name: AI risk assessment for ML engineers
+    href: ai-risk-assessment.md
+  - name: Bug bar to triage attacks on ML systems
+    href: /security/engineering/Bug-Bar-aiml?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json
+  - name: Azure Machine Learning customers guidance on enterprise security and governance
+    href: /azure/machine-learning/concept-enterprise-security?toc=/security/ai-red-team/toc.json&bc=/security/ai-red-team/breadcrumb/toc.json

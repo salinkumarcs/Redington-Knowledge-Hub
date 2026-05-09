@@ -1,0 +1,496 @@
+import dns from 'dns/promises'
+import http from 'http'
+import https from 'https'
+import type { LookupFunction } from 'net'
+import { createLogger } from '@sim/logger'
+import { toError } from '@sim/utils/errors'
+import * as ipaddr from 'ipaddr.js'
+import { isHosted } from '@/lib/core/config/feature-flags'
+import { type ValidationResult, validateExternalUrl } from '@/lib/core/security/input-validation'
+
+const logger = createLogger('InputValidation')
+
+/**
+ * Result type for async URL validation with resolved IP
+ */
+export interface AsyncValidationResult extends ValidationResult {
+  resolvedIP?: string
+  originalHostname?: string
+}
+
+/**
+ * Checks if an IP address is private or reserved (not routable on the public internet)
+ * Uses ipaddr.js for robust handling of all IP formats including:
+ * - Octal notation (0177.0.0.1)
+ * - Hex notation (0x7f000001)
+ * - IPv4-mapped IPv6 (::ffff:127.0.0.1)
+ * - IPv4-compatible IPv6 (::a.b.c.d / ::xxxx:xxxx, RFC 4291 §2.5.5.1, deprecated)
+ * - Various edge cases that regex patterns miss
+ */
+export function isPrivateOrReservedIP(ip: string): boolean {
+  try {
+    if (!ipaddr.isValid(ip)) {
+      return true
+    }
+
+    const addr = ipaddr.process(ip)
+    const range = addr.range()
+
+    if (range !== 'unicast') {
+      return true
+    }
+
+    if (addr.kind() === 'ipv6') {
+      const v6 = addr as ipaddr.IPv6
+      const parts = v6.parts
+      const firstSixZero = parts.slice(0, 6).every((p) => p === 0)
+      if (firstSixZero) {
+        const embedded = ipaddr.fromByteArray([
+          (parts[6] >> 8) & 0xff,
+          parts[6] & 0xff,
+          (parts[7] >> 8) & 0xff,
+          parts[7] & 0xff,
+        ])
+        return embedded.range() !== 'unicast'
+      }
+    }
+
+    return false
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Validates a URL and resolves its DNS to prevent SSRF via DNS rebinding
+ *
+ * This function:
+ * 1. Performs basic URL validation (protocol, format)
+ * 2. Resolves the hostname to an IP address
+ * 3. Validates the resolved IP is not private/reserved
+ * 4. Returns the resolved IP for use in the actual request
+ *
+ * @param url - The URL to validate
+ * @param paramName - Name of the parameter for error messages
+ * @returns AsyncValidationResult with resolved IP for DNS pinning
+ */
+export async function validateUrlWithDNS(
+  url: string | null | undefined,
+  paramName = 'url',
+  options: { allowHttp?: boolean } = {}
+): Promise<AsyncValidationResult> {
+  const basicValidation = validateExternalUrl(url, paramName, options)
+  if (!basicValidation.isValid) {
+    return basicValidation
+  }
+
+  const parsedUrl = new URL(url!)
+  const hostname = parsedUrl.hostname
+
+  const hostnameLower = hostname.toLowerCase()
+  const cleanHostname =
+    hostnameLower.startsWith('[') && hostnameLower.endsWith(']')
+      ? hostnameLower.slice(1, -1)
+      : hostnameLower
+
+  let isLocalhost = cleanHostname === 'localhost'
+  if (ipaddr.isValid(cleanHostname)) {
+    const processedIP = ipaddr.process(cleanHostname).toString()
+    if (processedIP === '127.0.0.1' || processedIP === '::1') {
+      isLocalhost = true
+    }
+  }
+
+  try {
+    const { address } = await dns.lookup(cleanHostname, { verbatim: true })
+
+    const resolvedIsLoopback =
+      ipaddr.isValid(address) &&
+      (() => {
+        const ip = ipaddr.process(address).toString()
+        return ip === '127.0.0.1' || ip === '::1'
+      })()
+
+    if (isPrivateOrReservedIP(address) && !(isLocalhost && resolvedIsLoopback && !isHosted)) {
+      logger.warn('URL resolves to blocked IP address', {
+        paramName,
+        hostname,
+        resolvedIP: address,
+      })
+      return {
+        isValid: false,
+        error: `${paramName} resolves to a blocked IP address`,
+      }
+    }
+
+    return {
+      isValid: true,
+      resolvedIP: address,
+      originalHostname: hostname,
+    }
+  } catch (error) {
+    logger.warn('DNS lookup failed for URL', {
+      paramName,
+      hostname,
+      error: toError(error).message,
+    })
+    return {
+      isValid: false,
+      error: `${paramName} hostname could not be resolved`,
+    }
+  }
+}
+
+/**
+ * Validates a database hostname by resolving DNS and checking the resolved IP
+ * against private/reserved ranges to prevent SSRF via database connections.
+ *
+ * Unlike validateHostname (which enforces strict RFC hostname format), this
+ * function is permissive about hostname format to avoid breaking legitimate
+ * database hostnames (e.g. underscores in Docker/K8s service names). It only
+ * blocks localhost and private/reserved IPs.
+ *
+ * @param host - The database hostname to validate
+ * @param paramName - Name of the parameter for error messages
+ * @returns AsyncValidationResult with resolved IP
+ */
+export async function validateDatabaseHost(
+  host: string | null | undefined,
+  paramName = 'host'
+): Promise<AsyncValidationResult> {
+  if (!host) {
+    return { isValid: false, error: `${paramName} is required` }
+  }
+
+  const lowerHost = host.toLowerCase()
+
+  if (lowerHost === 'localhost') {
+    return { isValid: false, error: `${paramName} cannot be localhost` }
+  }
+
+  if (ipaddr.isValid(lowerHost) && isPrivateOrReservedIP(lowerHost)) {
+    return { isValid: false, error: `${paramName} cannot be a private IP address` }
+  }
+
+  try {
+    const { address } = await dns.lookup(host, { verbatim: true })
+
+    if (isPrivateOrReservedIP(address)) {
+      logger.warn('Database host resolves to blocked IP address', {
+        paramName,
+        hostname: host,
+        resolvedIP: address,
+      })
+      return {
+        isValid: false,
+        error: `${paramName} resolves to a blocked IP address`,
+      }
+    }
+
+    return {
+      isValid: true,
+      resolvedIP: address,
+      originalHostname: host,
+    }
+  } catch (error) {
+    logger.warn('DNS lookup failed for database host', {
+      paramName,
+      hostname: host,
+      error: toError(error).message,
+    })
+    return {
+      isValid: false,
+      error: `${paramName} hostname could not be resolved`,
+    }
+  }
+}
+
+export interface SecureFetchOptions {
+  method?: string
+  headers?: Record<string, string>
+  body?: string | Buffer | Uint8Array
+  timeout?: number
+  maxRedirects?: number
+  maxResponseBytes?: number
+  signal?: AbortSignal
+}
+
+export class SecureFetchHeaders {
+  private headers: Map<string, string>
+  private setCookies: string[]
+
+  constructor(headers: Record<string, string>, setCookies: string[] = []) {
+    this.headers = new Map(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]))
+    this.setCookies = setCookies
+  }
+
+  get(name: string): string | null {
+    return this.headers.get(name.toLowerCase()) ?? null
+  }
+
+  /** Returns the raw `Set-Cookie` header values as an array. Each entry is one cookie. */
+  getSetCookie(): string[] {
+    return [...this.setCookies]
+  }
+
+  toRecord(): Record<string, string> {
+    const record: Record<string, string> = {}
+    for (const [key, value] of this.headers) {
+      record[key] = value
+    }
+    return record
+  }
+
+  [Symbol.iterator]() {
+    return this.headers.entries()
+  }
+}
+
+export interface SecureFetchResponse {
+  ok: boolean
+  status: number
+  statusText: string
+  headers: SecureFetchHeaders
+  text: () => Promise<string>
+  json: () => Promise<unknown>
+  arrayBuffer: () => Promise<ArrayBuffer>
+}
+
+const DEFAULT_MAX_REDIRECTS = 5
+
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400 && status !== 304
+}
+
+function resolveRedirectUrl(baseUrl: string, location: string): string {
+  try {
+    return new URL(location, baseUrl).toString()
+  } catch {
+    throw new Error(`Invalid redirect location: ${location}`)
+  }
+}
+
+/**
+ * Creates a DNS lookup function that always returns a pre-resolved IP address.
+ * Use this to prevent DNS rebinding (TOCTOU) attacks when connecting to
+ * user-controlled hostnames via non-HTTP protocols (SMTP, SSH, IMAP, etc.).
+ */
+export function createPinnedLookup(resolvedIP: string): LookupFunction {
+  const isIPv6 = resolvedIP.includes(':')
+  const family = isIPv6 ? 6 : 4
+
+  return (_hostname, options, callback) => {
+    if (options.all) {
+      callback(null, [{ address: resolvedIP, family }])
+    } else {
+      callback(null, resolvedIP, family)
+    }
+  }
+}
+
+/**
+ * Performs a fetch with IP pinning to prevent DNS rebinding attacks.
+ * Uses the pre-resolved IP address while preserving the original hostname for TLS SNI.
+ * Follows redirects securely by validating each redirect target.
+ */
+export async function secureFetchWithPinnedIP(
+  url: string,
+  resolvedIP: string,
+  options: SecureFetchOptions & { allowHttp?: boolean } = {},
+  redirectCount = 0
+): Promise<SecureFetchResponse> {
+  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
+  const maxResponseBytes = options.maxResponseBytes
+
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const isHttps = parsed.protocol === 'https:'
+    const defaultPort = isHttps ? 443 : 80
+    const port = parsed.port ? Number.parseInt(parsed.port, 10) : defaultPort
+
+    const lookup = createPinnedLookup(resolvedIP)
+
+    const agentOptions: http.AgentOptions = { lookup }
+
+    const agent = isHttps ? new https.Agent(agentOptions) : new http.Agent(agentOptions)
+
+    const { 'accept-encoding': _, ...sanitizedHeaders } = options.headers ?? {}
+
+    const requestOptions: http.RequestOptions = {
+      hostname: parsed.hostname,
+      port,
+      path: parsed.pathname + parsed.search,
+      method: options.method || 'GET',
+      headers: sanitizedHeaders,
+      agent,
+      timeout: options.timeout || 300000,
+    }
+
+    const protocol = isHttps ? https : http
+    const req = protocol.request(requestOptions, (res) => {
+      const statusCode = res.statusCode || 0
+      const location = res.headers.location
+
+      if (isRedirectStatus(statusCode) && location && redirectCount < maxRedirects) {
+        res.resume()
+        const redirectUrl = resolveRedirectUrl(url, location)
+
+        validateUrlWithDNS(redirectUrl, 'redirectUrl', { allowHttp: options.allowHttp })
+          .then((validation) => {
+            if (!validation.isValid) {
+              settledReject(new Error(`Redirect blocked: ${validation.error}`))
+              return
+            }
+            return secureFetchWithPinnedIP(
+              redirectUrl,
+              validation.resolvedIP!,
+              options,
+              redirectCount + 1
+            )
+          })
+          .then((response) => {
+            if (response) settledResolve(response)
+          })
+          .catch(settledReject)
+        return
+      }
+
+      if (isRedirectStatus(statusCode) && location && redirectCount >= maxRedirects) {
+        res.resume()
+        settledReject(new Error(`Too many redirects (max: ${maxRedirects})`))
+        return
+      }
+
+      const chunks: Buffer[] = []
+      let totalBytes = 0
+      let responseTerminated = false
+
+      res.on('data', (chunk: Buffer) => {
+        if (responseTerminated) return
+
+        totalBytes += chunk.length
+        if (
+          typeof maxResponseBytes === 'number' &&
+          maxResponseBytes > 0 &&
+          totalBytes > maxResponseBytes
+        ) {
+          responseTerminated = true
+          res.destroy(new Error(`Response exceeded maximum size of ${maxResponseBytes} bytes`))
+          return
+        }
+
+        chunks.push(chunk)
+      })
+
+      res.on('error', (error) => {
+        settledReject(error)
+      })
+
+      res.on('end', () => {
+        if (responseTerminated) return
+        const bodyBuffer = Buffer.concat(chunks)
+        const body = bodyBuffer.toString('utf-8')
+        const headersRecord: Record<string, string> = {}
+        let setCookieArray: string[] = []
+        for (const [key, value] of Object.entries(res.headers)) {
+          const lowerKey = key.toLowerCase()
+          if (lowerKey === 'set-cookie') {
+            if (Array.isArray(value)) {
+              setCookieArray = value
+              headersRecord[lowerKey] = value.join(', ')
+            } else if (typeof value === 'string') {
+              setCookieArray = [value]
+              headersRecord[lowerKey] = value
+            }
+          } else if (typeof value === 'string') {
+            headersRecord[lowerKey] = value
+          } else if (Array.isArray(value)) {
+            headersRecord[lowerKey] = value.join(', ')
+          }
+        }
+
+        settledResolve({
+          ok: statusCode >= 200 && statusCode < 300,
+          status: statusCode,
+          statusText: res.statusMessage || '',
+          headers: new SecureFetchHeaders(headersRecord, setCookieArray),
+          text: async () => body,
+          json: async () => JSON.parse(body),
+          arrayBuffer: async () =>
+            bodyBuffer.buffer.slice(
+              bodyBuffer.byteOffset,
+              bodyBuffer.byteOffset + bodyBuffer.byteLength
+            ),
+        })
+      })
+    })
+
+    let onAbort: (() => void) | null = null
+    const cleanupAbort = () => {
+      if (onAbort && options.signal) {
+        options.signal.removeEventListener('abort', onAbort)
+        onAbort = null
+      }
+    }
+    const settledResolve: typeof resolve = (value) => {
+      cleanupAbort()
+      resolve(value)
+    }
+    const settledReject: typeof reject = (reason) => {
+      cleanupAbort()
+      reject(reason)
+    }
+
+    req.on('error', (error) => {
+      settledReject(error)
+    })
+
+    req.on('timeout', () => {
+      req.destroy()
+      settledReject(new Error(`Request timed out after ${requestOptions.timeout}ms`))
+    })
+
+    if (options.signal) {
+      if (options.signal.aborted) {
+        req.destroy()
+        settledReject(options.signal.reason ?? new Error('Aborted'))
+        return
+      }
+      onAbort = () => {
+        req.destroy()
+        settledReject(options.signal?.reason ?? new Error('Aborted'))
+      }
+      options.signal.addEventListener('abort', onAbort, { once: true })
+    }
+
+    if (options.body) {
+      req.write(options.body)
+    }
+
+    req.end()
+  })
+}
+
+/**
+ * Validates a URL and performs a secure fetch with DNS pinning in one call.
+ * Combines validateUrlWithDNS and secureFetchWithPinnedIP for convenience.
+ *
+ * @param url - The URL to fetch
+ * @param options - Fetch options (method, headers, body, etc.)
+ * @param paramName - Name of the parameter for error messages (default: 'url')
+ * @returns SecureFetchResponse
+ * @throws Error if URL validation fails
+ */
+export async function secureFetchWithValidation(
+  url: string,
+  options: SecureFetchOptions & { allowHttp?: boolean } = {},
+  paramName = 'url'
+): Promise<SecureFetchResponse> {
+  const validation = await validateUrlWithDNS(url, paramName, {
+    allowHttp: options.allowHttp,
+  })
+  if (!validation.isValid) {
+    throw new Error(validation.error)
+  }
+  return secureFetchWithPinnedIP(url, validation.resolvedIP!, options)
+}

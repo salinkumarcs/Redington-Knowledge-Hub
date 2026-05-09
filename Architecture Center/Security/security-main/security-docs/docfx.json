@@ -1,0 +1,98 @@
+{
+  "build": {
+    "markdownEngineName": "markdig",
+    "content": [
+      {
+        "files": [
+          "**/*.md",
+          "**/*.yml"
+        ],
+        "exclude": [
+          "**/obj/**",
+          "**/includes/**",
+          "_themes/**",
+          "_themes.pdf/**",
+          "**/docfx.json",
+          "_repo.en-us/**",
+          "README.md",
+          "LICENSE",
+          "LICENSE-CODE",
+          "ThirdPartyNotices.md",
+          "SECURITY.md"
+        ]
+      }
+    ],
+    "resource": [
+      {
+        "files": [
+          "**/*.gif",
+          "**/*.jpeg",
+          "**/*.png",
+          "**/*.jpg",
+          "**/*.svg"
+        ],
+        "exclude": [
+          "**/obj/**",
+          "_themes/**",
+          "_themes.pdf/**",
+          "**/docfx.json",
+          "_repo.en-us/**"
+        ]
+      }
+    ],
+    "overwrite": [],
+    "externalReference": [],
+    "globalMetadata": {
+      "uhfHeaderId": "MSDocsHeader-Security",
+      "breadcrumb_path": "/security/breadcrumb/toc.json",
+      "feedback_system": "Standard",
+      "feedback_help_link_type": "get-help-at-qna",
+      "ms.author": "kenwith",
+      "author": "kenwith"
+    },
+    "fileMetadata": {
+      "titleSuffix": {
+        "*.md": "Security",
+        "*.yml": "Security",
+        "privileged-access-workstations/*.md": "Privileged access",
+        "privileged-access-workstations/*.yml": "Privileged access"
+      },
+      "author": {
+        "ransomware/**/*.md": "poliveria",
+        "ransomware/**/*.yml": "poliveria",
+        "security-for-ai/**/*.md": "guywi-ms",
+        "security-for-ai/**/*.yml": "guywi-ms"
+      },
+      "ms.author": {
+        "ransomware/**/*.md": "pauloliveria",
+        "ransomware/**/*.yml": "pauloliveria",
+        "security-for-ai/**/*.md": "guywild",
+        "security-for-ai/**/*.yml": "guywild"
+      },
+      "manager": {
+        "ransomware/**/*.md": "orspodek",
+        "ransomware/**/*.yml": "orspodek",
+        "security-for-ai/**/*.md": "orspodek",
+        "security-for-ai/**/*.yml": "orspodek"
+      },
+      "ms.service": {
+        "ransomware/**/*.md": "security",
+        "ransomware/**/*.yml": "security",
+        "security-for-ai/**/*.md": "security",
+        "security-for-ai/**/*.yml": "security"
+      },
+      "ms.subservice": {
+        "ransomware/**/*.md": "",
+        "ransomware/**/*.yml": "",
+        "security-for-ai/**/*.md": "",
+        "security-for-ai/**/*.yml": ""
+      },
+      "feedback_system": {
+        "privileged-access-workstations/**/*.md": "None",
+        "ai-red-team/**/*.md": "None"
+      }
+    },
+    "template": [],
+    "dest": "security-docs"
+  }
+}

@@ -1,0 +1,17 @@
+- name: Security workshops
+  href: index.yml
+  items:
+  - name: Overview
+    expanded: true
+    items:
+    - name: Security Adoption Resources
+      href: adoption.md
+  - name: End to end security
+    expanded: true
+    items:
+    - name: The CISO Workshop
+      href: the-ciso-workshop.md
+    - name: CISO Workshop videos
+      href: the-ciso-workshop-videos.md
+    - name: Microsoft Cybersecurity Reference Architectures
+      href: mcra.md

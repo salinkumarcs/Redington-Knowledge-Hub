@@ -1,0 +1,20 @@
+- name: Ransomware, extortion, and intrusion
+  href: index.yml
+  expanded: true
+  items:
+    - name: Human operated ransomware
+      href: human-operated-ransomware.md 
+    - name: Rapidly protect against ransomware, extortion, and intrusion
+      items:
+      - name: Ransomware defense overview
+        href: protect-against-ransomware.md
+      - name: Ransomware attack recovery plan
+        href: protect-against-ransomware-phase1.md  
+      - name: Limit the impact of ransomware attacks
+        href: protect-against-ransomware-phase2.md
+      - name: Defend against ransomware attacks
+        href: protect-against-ransomware-phase3.md
+    - name: Backup and restore plan for ransomware attack recovery
+      href: /azure/security/fundamentals/backup-plan-to-protect-against-ransomware 
+    - name: Microsoft Incident Response ransomware case study
+      href: dart-ransomware-case-study.md 
