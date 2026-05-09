@@ -1,0 +1,20 @@
+### YamlMime:Architecture
+metadata:
+  title: Siemens Teamcenter baseline architecture on Azure
+  description: Learn about the Siemens Teamcenter product lifecycle management (PLM) solution architecture on Azure.
+  author: claytonsiemens77
+  ms.author: sunitaphanse
+  ms.reviewer: ssumner
+  ms.date: 02/27/2026
+  ms.topic: example-scenario
+  ms.subservice: example-scenario
+azureCategories:
+  - storage 
+products:
+  - azure-virtual-machines
+  - azure-sql-database
+name: Siemens Teamcenter baseline architecture on Azure
+summary: Learn about the Siemens Teamcenter product lifecycle management (PLM) solution architecture on Azure.
+thumbnailUrl: /azure/architecture/browse/thumbs/teamcenter-baseline-architecture.png
+content: |
+  [!INCLUDE[](teamcenter-baseline-content.md)]
