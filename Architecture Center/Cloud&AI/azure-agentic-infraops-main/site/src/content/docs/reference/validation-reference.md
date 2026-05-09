@@ -1,0 +1,184 @@
+---
+title: "Validation and Linting Reference"
+description: "All validation scripts, linting, and CI workflows"
+---
+
+> Central reference for all validation scripts, linting commands, git hooks, and CI workflows.
+
+**Jump to:** [Architecture](#validation-architecture) ·
+[Lefthook Hooks](#lefthook-hooks) ·
+[Validation Scripts](#validation-scripts) ·
+[CI Workflows](#ci-workflows) ·
+[Running Locally](#running-validations-locally)
+
+## Validation Architecture
+
+Validation runs at three stages, catching issues progressively earlier:
+
+```mermaid
+flowchart LR
+    A["Pre-Commit<br/>(lefthook)"] --> B["Pre-Push<br/>(lefthook)"]
+    B --> C["CI<br/>(GitHub Actions)"]
+    style A fill:#e8f5e9,stroke:#4caf50,color:#000
+    style B fill:#fff3e0,stroke:#ff9800,color:#000
+    style C fill:#ffebee,stroke:#f44336,color:#000
+```
+
+1. **Pre-commit** — validates staged files only (fast, file-type scoped, parallel)
+2. **Pre-push** — validates all changed files vs `main` (domain-scoped, parallel)
+3. **CI** — validates the full repository on every PR and push to `main`
+
+## Lefthook Hooks
+
+All hooks are defined in `lefthook.yml` at the repository root.
+
+### Pre-Commit Hooks
+
+| Hook                    | Trigger (glob)                                      | Purpose                                               |
+| ----------------------- | --------------------------------------------------- | ----------------------------------------------------- |
+| `markdown-lint`         | `*.md`                                              | markdownlint on staged markdown files                 |
+| `link-check`            | `site/src/content/docs/**/*.{md,mdx}`               | Verify URLs in staged docs files                      |
+| `h2-sync`               | SKILL.md, azure-artifacts files                     | Check H2 heading sync across sources                  |
+| `artifact-validation`   | `agent-output/**/*.md`                              | Validate artifact H2 structure against templates      |
+| `agents`                | `**/*.agent.md`, `**/*.prompt.md`                   | Agent frontmatter, model alignment, body size         |
+| `instructions`          | `**/*.instructions.md`, agents, skills              | Instruction frontmatter and cross-reference validity  |
+| `secrets-baseline`      | _(all staged files)_                                | gitleaks secret scan (soft-skip if not installed)     |
+| `python-lint`           | `tools/mcp-servers/**/*.py`                         | Ruff linter on Python files                           |
+| `terraform-fmt`         | `*.tf`                                              | Terraform formatting check                            |
+| `terraform-validate`    | `*.tf`                                              | Terraform validation per project                      |
+| `iac-security-baseline` | `infra/bicep/**/*.bicep`, `infra/terraform/**/*.tf` | TLS 1.2, HTTPS-only, no public blob, managed identity |
+
+### Commit-Msg Hook
+
+| Hook         | Purpose                                                                     |
+| ------------ | --------------------------------------------------------------------------- |
+| `commitlint` | Enforce [Conventional Commits](https://www.conventionalcommits.org/) format |
+
+### Pre-Push Hooks
+
+| Hook               | Purpose                                             |
+| ------------------ | --------------------------------------------------- |
+| `branch-naming`    | Validate branch name uses an approved prefix        |
+| `branch-scope`     | Validate domain branches only modify in-scope files |
+| `diff-based-check` | Run domain-scoped validators for changed file types |
+
+## Validation Scripts
+
+All scripts are in the `tools/scripts/` directory. Run via `npm run <command>`.
+
+### Architecture and Registry Validators
+
+| npm Command                   | Script                            | Purpose                                        |
+| ----------------------------- | --------------------------------- | ---------------------------------------------- |
+| `validate:agents`             | `validate-agents.mjs`             | Agent frontmatter, body size, model alignment  |
+| `validate:skills`             | `validate-skills.mjs`             | Skill format, affinity, references, stale refs |
+| `validate:skill-checks`       | `validate-skill-checks.mjs`       | Skill size (≤500 lines) and references         |
+| `validate:instruction-checks` | `validate-instruction-checks.mjs` | Instruction frontmatter and applyTo patterns   |
+| `validate:agent-registry`     | `validate-agent-registry.mjs`     | Agent registry consistency                     |
+| `validate:workflow-graph`     | `validate-workflow-graph.mjs`     | DAG integrity (no orphans, no cycles)          |
+
+### Artifact and Template Validators
+
+| npm Command          | Script                   | Purpose                                                   |
+| -------------------- | ------------------------ | --------------------------------------------------------- |
+| `validate:artifacts` | `validate-artifacts.mjs` | H2 sync, template compliance, and auto-fix (with `--fix`) |
+| `e2e:validate`       | `validate-e2e-step.mjs`  | E2E pipeline structural validation                        |
+| `e2e:benchmark`      | `benchmark-e2e.mjs`      | 8-dimension benchmark scoring                             |
+
+### Governance and Compliance Validators
+
+| npm Command                      | Script                               | Purpose                                                      |
+| -------------------------------- | ------------------------------------ | ------------------------------------------------------------ |
+| `lint:governance-refs`           | `validate-governance-refs.mjs`       | Governance guardrails integrity                              |
+| `validate:no-hardcoded-counts`   | `validate-no-hardcoded-counts.mjs`   | Prevent hardcoded entity counts                              |
+| `lint:deprecated-refs`           | `validate-no-deprecated-refs.mjs`    | Block deprecated API/pattern references                      |
+| `validate:iac-security-baseline` | `validate-iac-security-baseline.mjs` | IaC security baseline (TLS, HTTPS, blob, identity, SQL auth) |
+
+### Session and State Validators
+
+| npm Command              | Script                       | Purpose                                                   |
+| ------------------------ | ---------------------------- | --------------------------------------------------------- |
+| `validate:session-state` | `validate-session-state.mjs` | Schema validation + deprecated lock/claim field detection |
+
+### Quality and Cross-Reference Validators
+
+| npm Command             | Script                          | Purpose                            |
+| ----------------------- | ------------------------------- | ---------------------------------- |
+| `lint:glob-audit`       | `validate-glob-audit.mjs`       | Detect overly broad glob patterns  |
+| `lint:orphaned-content` | `validate-orphaned-content.mjs` | Detect unreferenced skills/content |
+| `lint:docs-freshness`   | `check-docs-freshness.mjs`      | Documentation staleness detection  |
+| `lint:version-sync`     | `validate-version-sync.mjs`     | Version consistency across files   |
+
+### Configuration Validators
+
+| npm Command       | Script                       | Purpose                           |
+| ----------------- | ---------------------------- | --------------------------------- |
+| `validate:vscode` | `validate-vscode-config.mjs` | VS Code settings completeness     |
+| `validate:hooks`  | `validate-hooks.mjs`         | Hook script structure and syntax  |
+| `test:hooks`      | `test-hooks.sh`              | Hook integration tests (bats)     |
+| `lint:mcp-config` | `validate-mcp-config.mjs`    | MCP server configuration validity |
+
+### Code and Format Linters
+
+| npm Command          | Tool                | Purpose                                                  |
+| -------------------- | ------------------- | -------------------------------------------------------- |
+| `lint:md`            | markdownlint-cli2   | Markdown formatting and style                            |
+| `lint:links`         | markdown-link-check | URL validity in all markdown files                       |
+| `lint:links:docs`    | markdown-link-check | URL validity in site docs                                |
+| `lint:json`          | `lint-json.mjs`     | JSON/JSONC syntax validation                             |
+| `lint:python`        | ruff                | Python code quality (`tools/mcp-servers/azure-pricing/`) |
+| `lint:terraform-fmt` | terraform fmt       | Terraform formatting compliance                          |
+| `validate:terraform` | terraform validate  | Terraform validation per project                         |
+
+### Aggregate Commands
+
+| npm Command          | Purpose                                       |
+| -------------------- | --------------------------------------------- |
+| `validate:all`       | Run all validators (parallel Node + external) |
+| `validate:_node`     | All Node.js validators in parallel            |
+| `validate:_external` | All external tool validators in parallel      |
+| `validate:agents`    | Agent frontmatter, body, model alignment      |
+| `validate:artifacts` | H2 sync, template compliance, auto-fix        |
+| `validate:skills`    | Skill format, affinity, references, stale     |
+| `audit:quarterly`    | Quarterly context audit checks                |
+
+## CI Workflows
+
+All workflows are in `.github/workflows/`.
+
+| Workflow                  | File                            | Trigger                      | Purpose                                                                                            |
+| ------------------------- | ------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------- |
+| CI                        | `ci.yml`                        | PR to `main`, push to `main` | Full validation suite (markdown, agents, skills, hooks, gitleaks, bats tests, MCP, VS Code config) |
+| Branch Enforcement        | `branch-enforcement.yml`        | PR to `main`                 | Branch naming convention and scope validation                                                      |
+| Link Check                | `link-check.yml`                | Docs changes                 | URL validity in documentation                                                                      |
+| Docs                      | `docs.yml`                      | Docs changes                 | Build and deploy Astro Starlight site                                                              |
+| E2E Validation            | `e2e-validation.yml`            | Agent output changes         | E2E pipeline structural validation                                                                 |
+| Weekly Maintenance        | `weekly-maintenance.yml`        | Scheduled (weekly)           | Freshness audits, orphaned content, glob audit                                                     |
+| Azure Deprecation Tracker | `azure-deprecation-tracker.yml` | Scheduled                    | Track Azure service deprecations                                                                   |
+
+## Running Validations Locally
+
+```bash
+# Run everything
+npm run validate:all
+
+# Run a specific category
+npm run lint:md                    # Markdown only
+npm run validate:agents            # Agent definitions only
+npm run validate:session-state     # Session state only
+
+# Auto-fix where supported
+npm run lint:md:fix                # Fix markdown issues
+npm run fix:artifacts -- <file> --apply  # Fix artifact H2 headings
+npm run lint:python:fix            # Fix Python lint issues
+```
+
+---
+
+:::tip[Further Reading]
+
+- [Contributing](../../project/contributing/) — branch naming and commit conventions
+- [Agent Hooks](../../guides/hooks/) — VS Code agent hooks (lifecycle automation)
+- [E2E Testing](../../guides/e2e-testing/) — Ralph Loop evaluation framework
+
+  :::
